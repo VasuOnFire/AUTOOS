@@ -1,0 +1,41 @@
+========================================
+COPY EVERYTHING BELOW THIS LINE
+========================================
+
+PYTHON_VERSION=3.11.0
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
+ENVIRONMENT=production
+
+========================================
+STOP COPYING HERE
+========================================
+
+INSTRUCTIONS:
+1. Select all text between the lines above (Ctrl+A or Cmd+A)
+2. Copy it (Ctrl+C or Cmd+C)
+3. Go to Render dashboard → Your service → Environment tab
+4. Click "Add from .env" button
+5. Paste (Ctrl+V or Cmd+V)
+6. Click "Add variables"
+7. Done! ✅
+
+WHAT THIS DOES:
+- Sets Python version to 3.11.0
+- Configures JWT authentication
+- Sets token expiration times
+- Sets environment to production
+
+DATABASE & REDIS:
+These will be added automatically when you:
+1. Create PostgreSQL database in Render
+2. Create Redis instance in Render
+3. Connect them to your service
+
+OPTIONAL (Add later if you want):
+- OPENAI_API_KEY=sk-your-key (for AI features)
+- STRIPE_SECRET_KEY=sk_test_your-key (for payments)
+- SMTP settings (for emails)
+
+YOUR APP WILL WORK WITHOUT THESE! ✅
