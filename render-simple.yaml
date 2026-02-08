@@ -1,0 +1,76 @@
+# Render Blueprint for AUTOOS Omega - SIMPLIFIED VERSION
+# This version works WITHOUT manual environment variable setup
+
+services:
+  # Backend API Service
+  - type: web
+    name: autoos-backend
+    env: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt || echo "Some packages failed, continuing..."
+    startCommand: python -m uvicorn src.autoos.intent.api_minimal:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "7"
+      - key: ENVIRONMENT
+        value: production
+      # Database will be connected automatically
+      - key: DATABASE_URL
+        fromDatabase:
+          name: autoos-db
+          property: connectionString
+      # Redis will be connected automatically
+      - key: REDIS_URL
+        fromDatabase:
+          name: autoos-redis
+          property: connectionString
+      # Optional - can be added later
+      - key: OPENAI_API_KEY
+        value: "sk-optional-add-later"
+      - key: STRIPE_SECRET_KEY
+        value: "sk_test_optional"
+      - key: STRIPE_PUBLISHABLE_KEY
+        value: "pk_test_optional"
+
+  # Frontend Service
+  - type: web
+    name: autoos-frontend
+    env: static
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: |
+      cd frontend/web
+      npm install
+      npm run build
+    staticPublishPath: frontend/web/out
+    envVars:
+      - key: NODE_VERSION
+        value: "18.17.0"
+      - key: NEXT_PUBLIC_API_URL
+        value: https://autoos-backend.onrender.com
+
+databases:
+  # PostgreSQL Database - FREE for 90 days
+  - name: autoos-db
+    databaseName: autoos
+    user: autoos
+    plan: free
+    region: oregon
+
+  # Redis Cache - FREE for 30 days
+  - name: autoos-redis
+    plan: free
+    region: oregon
