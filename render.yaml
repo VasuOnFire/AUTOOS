@@ -9,7 +9,7 @@ services:
     region: oregon
     plan: free
     branch: main
-    buildCommand: pip install -r requirements.txt
+    buildCommand: bash render-build.sh
     startCommand: uvicorn src.autoos.intent.api:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION

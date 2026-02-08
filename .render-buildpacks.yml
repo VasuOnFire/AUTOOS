@@ -1,0 +1,6 @@
+# Render Buildpacks Configuration
+# This file configures the build process for Render deployment
+
+buildpacks:
+  - url: heroku/python
+    version: latest
