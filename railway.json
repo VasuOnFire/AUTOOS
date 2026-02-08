@@ -2,10 +2,10 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "pip install -r requirements.txt && cd frontend/web && npm install && npm run build"
+    "buildCommand": "pip install --upgrade pip && pip install -r requirements.txt"
   },
   "deploy": {
-    "startCommand": "uvicorn src.autoos.intent.api:app --host 0.0.0.0 --port $PORT",
+    "startCommand": "python -m uvicorn src.autoos.intent.api_minimal:app --host 0.0.0.0 --port $PORT",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
