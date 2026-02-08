@@ -1,0 +1,22 @@
+# Minimal requirements for Railway deployment
+# This keeps the image size under 4GB
+
+# Core Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+
+# Basic dependencies
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.0
+
+# Database (optional - can be added later)
+# psycopg2-binary==2.9.9
+# sqlalchemy==2.0.23
+
+# Redis (optional - can be added later)
+# redis==5.0.1
+
+# That's it! This will build in under 1GB
