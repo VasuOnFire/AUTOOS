@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: modsecurity-config
+  namespace: autoos-secure
+data:
+  modsecurity.conf: |
+    # ModSecurity Core Rules
+    SecRuleEngine On
+    SecRequestBodyAccess On
+    SecResponseBodyAccess On
+    SecRequestBodyLimit 13107200
+    SecRequestBodyNoFilesLimit 131072
+    SecRequestBodyLimitAction Reject
+    SecPcreMatchLimit 100000
+    SecPcreMatchLimitRecursion 100000
+    
+    # Audit logging
+    SecAuditEngine RelevantOnly
+    SecAuditLogRelevantStatus "^(?:5|4(?!04))"
+    SecAuditLogParts ABIJDEFHZ
+    SecAuditLogType Serial
+    SecAuditLog /var/log/modsec_audit.log
+    
+    # Debug logging
+    SecDebugLog /var/log/modsec_debug.log
+    SecDebugLogLevel 0
+    
+    # OWASP Core Rule Set
+    Include /etc/modsecurity/crs/crs-setup.conf
+    Include /etc/modsecurity/crs/rules/*.conf
+    
+    # Custom rules for AUTOOS
+    SecRule REQUEST_HEADERS:User-Agent "@contains bot" \
+        "id:1000,phase:1,deny,status:403,msg:'Bot detected'"
+    
+    SecRule REQUEST_URI "@rx (?i:(\.\./|\.\.\\))" \
+        "id:1001,phase:1,deny,status:403,msg:'Path traversal attempt'"
+    
+    SecRule ARGS "@rx (?i:(union|select|insert|update|delete|drop|create|alter).*from)" \
+        "id:1002,phase:2,deny,status:403,msg:'SQL injection attempt'"
+    
+    SecRule ARGS "@rx (?i:<script|javascript:|onerror=|onload=)" \
+        "id:1003,phase:2,deny,status:403,msg:'XSS attempt'"
+    
+    SecRule REQUEST_HEADERS:Content-Type "!@rx ^(application/json|multipart/form-data)" \
+        "id:1004,phase:1,deny,status:415,msg:'Unsupported content type'"
+    
+    # Rate limiting
+    SecAction "id:1005,phase:1,nolog,pass,initcol:ip=%{REMOTE_ADDR}"
+    SecRule IP:REQUEST_COUNT "@gt 100" \
+        "id:1006,phase:1,deny,status:429,msg:'Rate limit exceeded',\
+        setvar:ip.request_count=+1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: waf
+  namespace: autoos-secure
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: waf
+  template:
+    metadata:
+      labels:
+        app: waf
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
+      containers:
+      - name: nginx-modsecurity
+        image: owasp/modsecurity-crs:nginx-alpine
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+        ports:
+        - containerPort: 80
+          name: http
+        - containerPort: 443
+          name: https
+        volumeMounts:
+        - name: modsecurity-config
+          mountPath: /etc/modsecurity/modsecurity.conf
+          subPath: modsecurity.conf
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
+        - name: nginx-run
+          mountPath: /var/run
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+      volumes:
+      - name: modsecurity-config
+        configMap:
+          name: modsecurity-config
+      - name: nginx-cache
+        emptyDir: {}
+      - name: nginx-run
+        emptyDir: {}

@@ -1,0 +1,146 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: suricata-config
+  namespace: autoos-secure
+data:
+  suricata.yaml: |
+    vars:
+      address-groups:
+        HOME_NET: "[10.0.0.0/8,172.16.0.0/12,192.168.0.0/16]"
+        EXTERNAL_NET: "!$HOME_NET"
+    
+    default-rule-path: /etc/suricata/rules
+    rule-files:
+      - suricata.rules
+      - emerging-threats.rules
+      - autoos-custom.rules
+    
+    af-packet:
+      - interface: eth0
+        cluster-id: 99
+        cluster-type: cluster_flow
+        defrag: yes
+    
+    outputs:
+      - fast:
+          enabled: yes
+          filename: fast.log
+      - eve-log:
+          enabled: yes
+          filetype: regular
+          filename: eve.json
+          types:
+            - alert
+            - http
+            - dns
+            - tls
+            - files
+            - ssh
+    
+    app-layer:
+      protocols:
+        http:
+          enabled: yes
+          memcap: 64mb
+        tls:
+          enabled: yes
+          detection-ports:
+            dp: 443
+        ssh:
+          enabled: yes
+    
+    detect:
+      profile: high
+      custom-values:
+        toclient-groups: 3
+        toserver-groups: 25
+      sgh-mpm-context: auto
+      inspection-recursion-limit: 3000
+  
+  autoos-custom.rules: |
+    # Detect brute force attempts
+    alert tcp any any -> $HOME_NET 8000 (msg:"AUTOOS Brute Force Attempt"; \
+        flow:to_server,established; content:"POST"; http_method; \
+        content:"/api/auth"; http_uri; threshold:type both,track by_src,count 5,seconds 60; \
+        classtype:attempted-admin; sid:1000001; rev:1;)
+    
+    # Detect SQL injection attempts
+    alert tcp any any -> $HOME_NET 8000 (msg:"AUTOOS SQL Injection Attempt"; \
+        flow:to_server,established; content:"POST"; http_method; \
+        pcre:"/(\%27)|(\')|(\-\-)|(\%23)|(#)/i"; \
+        classtype:web-application-attack; sid:1000002; rev:1;)
+    
+    # Detect XSS attempts
+    alert tcp any any -> $HOME_NET 8000 (msg:"AUTOOS XSS Attempt"; \
+        flow:to_server,established; content:"<script"; nocase; \
+        classtype:web-application-attack; sid:1000003; rev:1;)
+    
+    # Detect command injection
+    alert tcp any any -> $HOME_NET 8000 (msg:"AUTOOS Command Injection"; \
+        flow:to_server,established; pcre:"/(;|\||`|\$\(|\$\{)/"; \
+        classtype:web-application-attack; sid:1000004; rev:1;)
+    
+    # Detect port scanning
+    alert tcp any any -> $HOME_NET any (msg:"AUTOOS Port Scan Detected"; \
+        flags:S; threshold:type both,track by_src,count 20,seconds 10; \
+        classtype:attempted-recon; sid:1000005; rev:1;)
+    
+    # Detect DDoS attempts
+    alert tcp any any -> $HOME_NET 8000 (msg:"AUTOOS Potential DDoS"; \
+        flow:to_server; threshold:type both,track by_src,count 100,seconds 1; \
+        classtype:attempted-dos; sid:1000006; rev:1;)
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: suricata-ids
+  namespace: autoos-secure
+spec:
+  selector:
+    matchLabels:
+      app: suricata-ids
+  template:
+    metadata:
+      labels:
+        app: suricata-ids
+    spec:
+      hostNetwork: true
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+      containers:
+      - name: suricata
+        image: jasonish/suricata:latest
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+            - SYS_NICE
+        command:
+        - /usr/bin/suricata
+        - -c
+        - /etc/suricata/suricata.yaml
+        - -i
+        - eth0
+        volumeMounts:
+        - name: suricata-config
+          mountPath: /etc/suricata
+        - name: suricata-logs
+          mountPath: /var/log/suricata
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 4000m
+            memory: 8Gi
+      volumes:
+      - name: suricata-config
+        configMap:
+          name: suricata-config
+      - name: suricata-logs
+        hostPath:
+          path: /var/log/suricata
+          type: DirectoryOrCreate

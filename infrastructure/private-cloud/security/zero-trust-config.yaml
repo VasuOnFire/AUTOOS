@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: istio-security-config
+  namespace: autoos-secure
+data:
+  mesh-config.yaml: |
+    # Mutual TLS enforcement
+    defaultConfig:
+      proxyMetadata:
+        ISTIO_META_TLS_CLIENT_CERT_CHAIN: /etc/certs/cert-chain.pem
+        ISTIO_META_TLS_CLIENT_KEY: /etc/certs/key.pem
+        ISTIO_META_TLS_CLIENT_ROOT_CERT: /etc/certs/root-cert.pem
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: autoos-secure
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: autoos-api-authz
+  namespace: autoos-secure
+spec:
+  selector:
+    matchLabels:
+      app: autoos-api
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/autoos-secure/sa/autoos-frontend"]
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        paths: ["/api/*"]
+    when:
+    - key: request.auth.claims[iss]
+      values: ["https://autoos.secure/"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all-default
+  namespace: autoos-secure
+spec:
+  action: DENY
+  rules:
+  - from:
+    - source:
+        notNamespaces: ["autoos-secure"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: RequestAuthentication
+metadata:
+  name: jwt-autoos
+  namespace: autoos-secure
+spec:
+  selector:
+    matchLabels:
+      app: autoos-api
+  jwtRules:
+  - issuer: "https://autoos.secure/"
+    jwksUri: "https://vault.autoos-secure.svc.cluster.local:8200/v1/identity/oidc/.well-known/jwks"
+    audiences:
+    - "autoos-api"
+    forwardOriginalToken: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oauth2-proxy-config
+  namespace: autoos-secure
+data:
+  oauth2_proxy.cfg: |
+    provider = "oidc"
+    oidc_issuer_url = "https://vault.autoos-secure.svc.cluster.local:8200/v1/identity/oidc"
+    
+    redirect_url = "https://autoos.secure/oauth2/callback"
+    upstreams = ["http://autoos-api.autoos-secure.svc.cluster.local:8000"]
+    
+    email_domains = ["*"]
+    cookie_secure = true
+    cookie_httponly = true
+    cookie_samesite = "strict"
+    cookie_expire = "4h"
+    cookie_refresh = "1h"
+    
+    pass_authorization_header = true
+    pass_access_token = true
+    pass_user_headers = true
+    set_authorization_header = true
+    set_xauthrequest = true
+    
+    skip_provider_button = true
+    
+    # Security headers
+    set_custom_headers = [
+      "X-Frame-Options:DENY",
+      "X-Content-Type-Options:nosniff",
+      "X-XSS-Protection:1; mode=block",
+      "Strict-Transport-Security:max-age=31536000; includeSubDomains; preload",
+      "Content-Security-Policy:default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+      "Referrer-Policy:strict-origin-when-cross-origin",
+      "Permissions-Policy:geolocation=(), microphone=(), camera=()"
+    ]

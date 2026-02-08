@@ -1,0 +1,199 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-config
+  namespace: autoos-secure
+data:
+  falco.yaml: |
+    rules_file:
+      - /etc/falco/falco_rules.yaml
+      - /etc/falco/falco_rules.local.yaml
+      - /etc/falco/k8s_audit_rules.yaml
+      - /etc/falco/autoos_custom_rules.yaml
+    
+    json_output: true
+    json_include_output_property: true
+    
+    log_stderr: true
+    log_syslog: true
+    log_level: info
+    
+    priority: debug
+    
+    buffered_outputs: true
+    
+    outputs:
+      rate: 1
+      max_burst: 1000
+    
+    syslog_output:
+      enabled: true
+    
+    file_output:
+      enabled: true
+      keep_alive: false
+      filename: /var/log/falco/events.log
+    
+    stdout_output:
+      enabled: true
+    
+    webserver:
+      enabled: true
+      listen_port: 8765
+      k8s_healthz_endpoint: /healthz
+      ssl_enabled: true
+      ssl_certificate: /etc/falco/certs/server.crt
+      ssl_key: /etc/falco/certs/server.key
+    
+    program_output:
+      enabled: true
+      keep_alive: false
+      program: "jq '{text: .output}' | curl -d @- -X POST https://slack.webhook.url"
+  
+  autoos_custom_rules.yaml: |
+    - rule: Unauthorized Process in Container
+      desc: Detect unauthorized process execution in AUTOOS containers
+      condition: >
+        spawned_process and container and
+        container.image.repository = "autoos" and
+        not proc.name in (python, gunicorn, celery, redis-server, postgres)
+      output: >
+        Unauthorized process started in AUTOOS container
+        (user=%user.name command=%proc.cmdline container=%container.name image=%container.image.repository)
+      priority: WARNING
+      tags: [container, process, autoos]
+    
+    - rule: Sensitive File Access
+      desc: Detect access to sensitive files
+      condition: >
+        open_read and container and
+        fd.name in (/etc/shadow, /etc/passwd, /root/.ssh/id_rsa, /etc/ssl/private)
+      output: >
+        Sensitive file accessed (user=%user.name file=%fd.name container=%container.name)
+      priority: CRITICAL
+      tags: [filesystem, security]
+    
+    - rule: Privilege Escalation Attempt
+      desc: Detect privilege escalation attempts
+      condition: >
+        spawned_process and container and
+        proc.name in (sudo, su, setuid) and
+        not user.name = root
+      output: >
+        Privilege escalation attempt detected (user=%user.name command=%proc.cmdline)
+      priority: CRITICAL
+      tags: [privilege_escalation, security]
+    
+    - rule: Network Connection to Suspicious IP
+      desc: Detect connections to known malicious IPs
+      condition: >
+        outbound and container and
+        fd.sip in (suspicious_ips)
+      output: >
+        Connection to suspicious IP (ip=%fd.sip port=%fd.sport container=%container.name)
+      priority: WARNING
+      tags: [network, security]
+    
+    - rule: Crypto Mining Activity
+      desc: Detect potential crypto mining
+      condition: >
+        spawned_process and container and
+        proc.name in (xmrig, minerd, cpuminer, ethminer)
+      output: >
+        Potential crypto mining detected (process=%proc.name container=%container.name)
+      priority: CRITICAL
+      tags: [malware, cryptomining]
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: falco
+  namespace: autoos-secure
+spec:
+  selector:
+    matchLabels:
+      app: falco
+  template:
+    metadata:
+      labels:
+        app: falco
+    spec:
+      serviceAccountName: falco
+      hostNetwork: true
+      hostPID: true
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+      containers:
+      - name: falco
+        image: falcosecurity/falco:latest
+        securityContext:
+          privileged: true
+        args:
+        - /usr/bin/falco
+        - --cri
+        - /run/containerd/containerd.sock
+        - -K
+        - /var/run/secrets/kubernetes.io/serviceaccount/token
+        - -k
+        - https://kubernetes.default
+        - -pk
+        volumeMounts:
+        - name: docker-socket
+          mountPath: /host/var/run/docker.sock
+        - name: containerd-socket
+          mountPath: /run/containerd/containerd.sock
+        - name: dev-fs
+          mountPath: /host/dev
+        - name: proc-fs
+          mountPath: /host/proc
+          readOnly: true
+        - name: boot-fs
+          mountPath: /host/boot
+          readOnly: true
+        - name: lib-modules
+          mountPath: /host/lib/modules
+          readOnly: true
+        - name: usr-fs
+          mountPath: /host/usr
+          readOnly: true
+        - name: etc-fs
+          mountPath: /host/etc
+          readOnly: true
+        - name: falco-config
+          mountPath: /etc/falco
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+      volumes:
+      - name: docker-socket
+        hostPath:
+          path: /var/run/docker.sock
+      - name: containerd-socket
+        hostPath:
+          path: /run/containerd/containerd.sock
+      - name: dev-fs
+        hostPath:
+          path: /dev
+      - name: proc-fs
+        hostPath:
+          path: /proc
+      - name: boot-fs
+        hostPath:
+          path: /boot
+      - name: lib-modules
+        hostPath:
+          path: /lib/modules
+      - name: usr-fs
+        hostPath:
+          path: /usr
+      - name: etc-fs
+        hostPath:
+          path: /etc
+      - name: falco-config
+        configMap:
+          name: falco-config

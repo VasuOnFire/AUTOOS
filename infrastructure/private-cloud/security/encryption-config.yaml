@@ -1,0 +1,48 @@
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+  - resources:
+      - secrets
+      - configmaps
+    providers:
+      - aescbc:
+          keys:
+            - name: key1
+              secret: <BASE64_ENCODED_SECRET>
+      - identity: {}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: autoos-encryption-key
+  namespace: autoos-secure
+type: Opaque
+data:
+  key: <GENERATED_AES_256_KEY>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: encryption-config
+  namespace: autoos-secure
+data:
+  encryption.conf: |
+    # Database encryption
+    ssl = on
+    ssl_cert_file = '/etc/ssl/certs/server.crt'
+    ssl_key_file = '/etc/ssl/private/server.key'
+    ssl_ca_file = '/etc/ssl/certs/ca.crt'
+    ssl_min_protocol_version = 'TLSv1.3'
+    ssl_ciphers = 'TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256'
+    
+    # Transparent Data Encryption
+    data_encryption = on
+    encryption_algorithm = 'AES-256-GCM'
+    
+    # Redis encryption
+    tls-port = 6380
+    tls-cert-file = /etc/ssl/certs/redis.crt
+    tls-key-file = /etc/ssl/private/redis.key
+    tls-ca-cert-file = /etc/ssl/certs/ca.crt
+    tls-protocols = "TLSv1.3"
+    tls-ciphers = TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256

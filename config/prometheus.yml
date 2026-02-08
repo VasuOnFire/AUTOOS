@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'autoos-api'
+    static_configs:
+      - targets: ['api:8000']
+    metrics_path: '/metrics'
+
+  - job_name: 'autoos-orchestrator'
+    static_configs:
+      - targets: ['orchestrator:9091']
+    metrics_path: '/metrics'
+
+  - job_name: 'autoos-agent-workers'
+    static_configs:
+      - targets: ['agent-worker:9092']
+    metrics_path: '/metrics'
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

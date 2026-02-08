@@ -1,0 +1,193 @@
+version: '3.8'
+
+services:
+  # Redis - Event Bus & Working Memory
+  redis:
+    image: redis:7-alpine
+    container_name: autoos-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autoos-network
+
+  # PostgreSQL - Session Memory & Audit
+  postgres:
+    image: postgres:16-alpine
+    container_name: autoos-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-autoos}
+      POSTGRES_USER: ${POSTGRES_USER:-autoos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autoos_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autoos}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autoos-network
+
+  # ChromaDB - Long-term Memory (Vector DB)
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: autoos-chromadb
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autoos-network
+
+  # API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    container_name: autoos-api
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - POSTGRES_HOST=postgres
+      - CHROMA_HOST=chromadb
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    command: uvicorn autoos.intent.api:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autoos-network
+
+  # Orchestrator Service
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: orchestrator
+    container_name: autoos-orchestrator
+    environment:
+      - REDIS_HOST=redis
+      - POSTGRES_HOST=postgres
+      - CHROMA_HOST=chromadb
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    command: python -m autoos.orchestration.orchestrator_service
+    networks:
+      - autoos-network
+
+  # Agent Worker Pool (scalable)
+  agent-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: agent-worker
+    environment:
+      - REDIS_HOST=redis
+      - POSTGRES_HOST=postgres
+      - CHROMA_HOST=chromadb
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: python -m autoos.execution.agent_worker_service
+    deploy:
+      replicas: 3
+    networks:
+      - autoos-network
+
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: autoos-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - autoos-network
+
+  # Grafana - Monitoring Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: autoos-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - autoos-network
+
+volumes:
+  redis-data:
+  postgres-data:
+  chroma-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  autoos-network:
+    driver: bridge

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: autoos-secure
+  labels:
+    name: autoos-secure
+    security-level: maximum
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: autoos-quota
+  namespace: autoos-secure
+spec:
+  hard:
+    requests.cpu: "100"
+    requests.memory: 200Gi
+    requests.storage: 1Ti
+    persistentvolumeclaims: "50"
+    pods: "100"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: autoos-limits
+  namespace: autoos-secure
+spec:
+  limits:
+  - max:
+      cpu: "8"
+      memory: 16Gi
+    min:
+      cpu: "100m"
+      memory: 128Mi
+    type: Container
